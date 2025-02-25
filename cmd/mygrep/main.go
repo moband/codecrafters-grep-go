@@ -1,12 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
-	"unicode"
-	"unicode/utf8"
 )
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
@@ -38,21 +35,6 @@ func main() {
 
 func matchLine(line []byte, pattern string) (bool, error) {
 
-	if len(pattern) == 2 && pattern[0] == '\\' {
-		switch pattern[1] {
-		case 'd':
-			return bytes.ContainsFunc(line, unicode.IsDigit), nil
-		case 'w':
-			return bytes.ContainsFunc(line, func(r rune) bool {
-				return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
-			}), nil
-		}
-	}
-
-	if utf8.RuneCountInString(pattern) != 1 {
-		return false, fmt.Errorf("unsupported pattern: %q", pattern)
-	}
-
-	ok := bytes.ContainsAny(line, pattern)
-	return ok, nil
+	matcher := NewPatternMatcherRegistry()
+	return matcher.Match(line, pattern)
 }
