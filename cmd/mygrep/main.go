@@ -48,7 +48,16 @@ func (m *CharacterGroupMatcher) CanHandle(pattern string) bool {
 }
 
 func (m *CharacterGroupMatcher) Match(line []byte, pattern string) (bool, error) {
-	return bytes.ContainsAny(line, pattern[1:len(pattern)-1]), nil
+
+	if len(pattern) >= 4 && pattern[1] == '^' {
+		chars := pattern[2 : len(pattern)-1]
+		return bytes.IndexFunc(line, func(r rune) bool {
+			return !bytes.ContainsRune([]byte(chars), r)
+		}) >= 0, nil
+	}
+
+	chars := pattern[1 : len(pattern)-1]
+	return bytes.ContainsAny(line, chars), nil
 }
 
 // CharacterClassMatcher handles patterns like \d and \w
