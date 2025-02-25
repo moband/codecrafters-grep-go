@@ -37,18 +37,22 @@ func main() {
 }
 
 func matchLine(line []byte, pattern string) (bool, error) {
-	var ok bool
 
-	if pattern == "\\d" {
-		ok = bytes.ContainsFunc(line, unicode.IsDigit)
-	} else {
-
-		if utf8.RuneCountInString(pattern) != 1 {
-			return false, fmt.Errorf("unsupported pattern: %q", pattern)
+	if len(pattern) == 2 && pattern[0] == '\\' {
+		switch pattern[1] {
+		case 'd':
+			return bytes.ContainsFunc(line, unicode.IsDigit), nil
+		case 'w':
+			return bytes.ContainsFunc(line, func(r rune) bool {
+				return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+			}), nil
 		}
-
-		ok = bytes.ContainsAny(line, pattern)
-
 	}
+
+	if utf8.RuneCountInString(pattern) != 1 {
+		return false, fmt.Errorf("unsupported pattern: %q", pattern)
+	}
+
+	ok := bytes.ContainsAny(line, pattern)
 	return ok, nil
 }
