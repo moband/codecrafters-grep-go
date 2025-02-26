@@ -80,18 +80,26 @@ func match(text, pattern string, i, j int) (bool, error) {
 		}
 
 		count := 1
-		for i+count < len(text) {
-			nextMatched, err := matchSingleChar(text, pattern, i+count, j)
+		maxCount := 0
+
+		for i+maxCount < len(text) {
+			nextMatched, err := matchSingleChar(text, pattern, i+maxCount, j)
 			if err != nil {
 				return false, err
 			}
 			if !nextMatched {
 				break
 			}
-			count++
+			maxCount++
 		}
 
-		return match(text, pattern, i+count, j+2)
+		for count = maxCount; count >= 1; count-- {
+			if ok, _ := match(text, pattern, i+count, j+2); ok {
+				return true, nil
+			}
+		}
+
+		return false, nil
 	}
 
 	if j+1 < len(pattern) && pattern[j+1] == '?' {
@@ -147,6 +155,10 @@ func match(text, pattern string, i, j int) (bool, error) {
 func matchSingleChar(text, pattern string, i, j int) (bool, error) {
 	if i >= len(text) {
 		return false, nil
+	}
+
+	if pattern[j] == '.' {
+		return true, nil
 	}
 
 	if j+1 < len(pattern) && pattern[j] == '\\' {
