@@ -70,23 +70,71 @@ func match(text, pattern string, i, j int) (bool, error) {
 		return match(text, pattern, i, j+1)
 	}
 
+	if j+1 < len(pattern) && pattern[j+1] == '+' {
+
+		matched, err := matchSingleChar(text, pattern, i, j)
+		if err != nil {
+			return false, err
+		}
+		if !matched {
+			return false, nil
+		}
+
+		count := 1
+		for i+count < len(text) {
+			nextMatched, err := matchSingleChar(text, pattern, i+count, j)
+			if err != nil {
+				return false, err
+			}
+			if !nextMatched {
+				break
+			}
+			count++
+		}
+
+		return match(text, pattern, i+count, j+2)
+	}
+
+	matched, err := matchSingleChar(text, pattern, i, j)
+	if err != nil {
+		return false, err
+	}
+
+	if matched {
+		patternAdvance := 1
+
+		if j+1 < len(pattern) && pattern[j] == '\\' {
+			patternAdvance = 2
+		} else if pattern[j] == '[' {
+			closeBracket := strings.IndexByte(pattern[j:], ']')
+			if closeBracket == -1 {
+				return false, nil
+			}
+			patternAdvance = closeBracket + 1
+		}
+
+		return match(text, pattern, i+1, j+patternAdvance)
+	}
+
+	return false, nil
+}
+
+func matchSingleChar(text, pattern string, i, j int) (bool, error) {
+	if i >= len(text) {
+		return false, nil
+	}
+
 	if j+1 < len(pattern) && pattern[j] == '\\' {
-		matched := false
 		switch pattern[j+1] {
 		case 'd':
-			matched = unicode.IsDigit(rune(text[i]))
+			return unicode.IsDigit(rune(text[i])), nil
 		case 'w':
-			matched = unicode.IsLetter(rune(text[i])) || unicode.IsDigit(rune(text[i])) || text[i] == '_'
+			return unicode.IsLetter(rune(text[i])) || unicode.IsDigit(rune(text[i])) || text[i] == '_', nil
 		case '\\':
-			matched = text[i] == '\\'
+			return text[i] == '\\', nil
 		default:
 			return false, fmt.Errorf("invalid escape sequence: %c", pattern[j+1])
 		}
-
-		if matched {
-			return match(text, pattern, i+1, j+2)
-		}
-		return false, nil
 	}
 
 	if pattern[j] == '[' {
@@ -96,9 +144,6 @@ func match(text, pattern string, i, j int) (bool, error) {
 		}
 
 		closeBracket += j
-		if i >= len(text) {
-			return false, nil
-		}
 
 		isNegative := j+1 < len(pattern) && pattern[j+1] == '^'
 		startIdx := j + 1
@@ -109,15 +154,8 @@ func match(text, pattern string, i, j int) (bool, error) {
 		chars := pattern[startIdx:closeBracket]
 		charInGroup := strings.ContainsRune(chars, rune(text[i]))
 
-		if (isNegative && !charInGroup) || (!isNegative && charInGroup) {
-			return match(text, pattern, i+1, closeBracket+1)
-		}
-		return false, nil
+		return (isNegative && !charInGroup) || (!isNegative && charInGroup), nil
 	}
 
-	if pattern[j] == text[i] {
-		return match(text, pattern, i+1, j+1)
-	}
-
-	return false, nil
+	return pattern[j] == text[i], nil
 }
