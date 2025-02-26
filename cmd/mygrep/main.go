@@ -36,7 +36,21 @@ func main() {
 }
 
 func matchLine(line []byte, pattern string) (bool, error) {
-	return match(string(line), pattern, 0, 0)
+	text := string(line)
+
+	if len(pattern) > 0 && pattern[0] == '^' {
+		return match(text, pattern, 0, 0)
+	}
+
+	for startPos := 0; startPos < len(text); startPos++ {
+		if matched, err := match(text, pattern, startPos, 0); err != nil {
+			return false, err
+		} else if matched {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func match(text, pattern string, i, j int) (bool, error) {
@@ -48,6 +62,10 @@ func match(text, pattern string, i, j int) (bool, error) {
 		return false, nil
 	}
 
+	if j == 0 && pattern[j] == '^' {
+		return match(text, pattern, i, j+1)
+	}
+
 	if j+1 < len(pattern) && pattern[j] == '\\' {
 		matched := false
 		switch pattern[j+1] {
@@ -55,17 +73,16 @@ func match(text, pattern string, i, j int) (bool, error) {
 			matched = unicode.IsDigit(rune(text[i]))
 		case 'w':
 			matched = unicode.IsLetter(rune(text[i])) || unicode.IsDigit(rune(text[i])) || text[i] == '_'
+		case '\\':
+			matched = text[i] == '\\'
 		default:
-			return false, nil
+			return false, fmt.Errorf("invalid escape sequence: %c", pattern[j+1])
 		}
 
 		if matched {
-			if ok, _ := match(text, pattern, i+1, j+2); ok {
-				return true, nil
-			}
+			return match(text, pattern, i+1, j+2)
 		}
-
-		return match(text, pattern, i+1, j)
+		return false, nil
 	}
 
 	if pattern[j] == '[' {
@@ -89,18 +106,14 @@ func match(text, pattern string, i, j int) (bool, error) {
 		charInGroup := strings.ContainsRune(chars, rune(text[i]))
 
 		if (isNegative && !charInGroup) || (!isNegative && charInGroup) {
-			if ok, _ := match(text, pattern, i+1, closeBracket+1); ok {
-				return true, nil
-			}
+			return match(text, pattern, i+1, closeBracket+1)
 		}
-		return match(text, pattern, i+1, j)
+		return false, nil
 	}
 
 	if pattern[j] == text[i] {
-		if ok, _ := match(text, pattern, i+1, j+1); ok {
-			return true, nil
-		}
+		return match(text, pattern, i+1, j+1)
 	}
 
-	return match(text, pattern, i+1, j)
+	return false, nil
 }
