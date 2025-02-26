@@ -71,7 +71,6 @@ func match(text, pattern string, i, j int) (bool, error) {
 	}
 
 	if j+1 < len(pattern) && pattern[j+1] == '+' {
-
 		matched, err := matchSingleChar(text, pattern, i, j)
 		if err != nil {
 			return false, err
@@ -93,6 +92,32 @@ func match(text, pattern string, i, j int) (bool, error) {
 		}
 
 		return match(text, pattern, i+count, j+2)
+	}
+
+	if j+1 < len(pattern) && pattern[j+1] == '?' {
+		matched, err := matchSingleChar(text, pattern, i, j)
+		if err != nil {
+			return false, err
+		}
+
+		patternAdvance := 1
+		if j+1 < len(pattern) && pattern[j] == '\\' {
+			patternAdvance = 2
+		} else if pattern[j] == '[' {
+			closeBracket := strings.IndexByte(pattern[j:], ']')
+			if closeBracket == -1 {
+				return false, nil
+			}
+			patternAdvance = closeBracket + 1
+		}
+
+		if matched {
+			if ok, _ := match(text, pattern, i+1, j+patternAdvance+1); ok {
+				return true, nil
+			}
+		}
+
+		return match(text, pattern, i, j+patternAdvance+1)
 	}
 
 	matched, err := matchSingleChar(text, pattern, i, j)
