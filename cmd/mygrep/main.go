@@ -58,6 +58,10 @@ func match(text, pattern string, i, j int) (bool, error) {
 		return true, nil
 	}
 
+	if j == len(pattern)-1 && pattern[j] == '$' {
+		return i == len(text), nil
+	}
+
 	if i >= len(text) {
 		return false, nil
 	}
