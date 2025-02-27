@@ -70,6 +70,36 @@ func match(text, pattern string, i, j int) (bool, error) {
 		return match(text, pattern, i, j+1)
 	}
 
+	if pattern[j] == '(' {
+		depth := 1
+		end := j + 1
+		for end < len(pattern) && depth > 0 {
+			if pattern[end] == '(' {
+				depth++
+			} else if pattern[end] == ')' {
+				depth--
+			}
+			end++
+		}
+
+		if depth > 0 {
+			return false, fmt.Errorf("unmatched opening parenthesis")
+		}
+		end--
+
+		content := pattern[j+1 : end]
+		alternatives := splitAlternatives(content)
+
+		for _, alt := range alternatives {
+			newPattern := pattern[:j] + alt + pattern[end+1:]
+			if matched, _ := match(text, newPattern, i, j); matched {
+				return true, nil
+			}
+		}
+
+		return false, nil
+	}
+
 	if j+1 < len(pattern) && pattern[j+1] == '+' {
 		matched, err := matchSingleChar(text, pattern, i, j)
 		if err != nil {
@@ -195,4 +225,36 @@ func matchSingleChar(text, pattern string, i, j int) (bool, error) {
 	}
 
 	return pattern[j] == text[i], nil
+}
+
+func splitAlternatives(pattern string) []string {
+	var result []string
+	var current strings.Builder
+	depth := 0
+
+	for _, char := range pattern {
+		switch char {
+		case '(':
+			depth++
+			current.WriteRune(char)
+		case ')':
+			depth--
+			current.WriteRune(char)
+		case '|':
+			if depth == 0 {
+				result = append(result, current.String())
+				current.Reset()
+			} else {
+				current.WriteRune(char)
+			}
+		default:
+			current.WriteRune(char)
+		}
+	}
+
+	if current.Len() > 0 {
+		result = append(result, current.String())
+	}
+
+	return result
 }
