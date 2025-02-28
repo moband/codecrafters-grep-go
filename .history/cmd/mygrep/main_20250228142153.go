@@ -12,7 +12,6 @@ import (
 // Store multiple capture groups
 var capturedGroups []string
 var groupCaptured []bool
-var nextGroupNum int // To keep track of the next group number
 
 func main() {
 	if len(os.Args) < 3 || os.Args[1] != "-E" {
@@ -45,7 +44,6 @@ func matchLine(line []byte, pattern string) (bool, error) {
 	// Initialize captured groups to handle up to 9 groups
 	capturedGroups = make([]string, 10)
 	groupCaptured = make([]bool, 10)
-	nextGroupNum = 1 // Group numbering starts at 1
 
 	if len(pattern) > 0 && pattern[0] == '^' {
 		return match(text, pattern, 0, 0)
@@ -84,7 +82,7 @@ func match(text, pattern string, i, j int) (bool, error) {
 	if j+1 < len(pattern) && pattern[j] == '\\' && unicode.IsDigit(rune(pattern[j+1])) {
 		groupNumStr := string(pattern[j+1])
 		groupNum, err := strconv.Atoi(groupNumStr)
-		if err != nil || groupNum >= len(capturedGroups) || groupNum == 0 {
+		if err != nil || groupNum >= len(capturedGroups) {
 			return false, fmt.Errorf("invalid backreference: \\%s", groupNumStr)
 		}
 
@@ -107,9 +105,13 @@ func match(text, pattern string, i, j int) (bool, error) {
 	// Handle capturing group ( ... )
 	//-------------------------------------------------------------
 	if pattern[j] == '(' {
-		// Get the current group number and increment for the next one
-		groupNum := nextGroupNum
-		nextGroupNum++
+		// Count the number of opening parentheses before this one to determine the group number
+		groupNum := 0
+		for k := 0; k < j; k++ {
+			if pattern[k] == '(' {
+				groupNum++
+			}
+		}
 
 		// Make sure we have enough space
 		if groupNum >= len(capturedGroups) {
@@ -178,8 +180,6 @@ func match(text, pattern string, i, j int) (bool, error) {
 				}
 			}
 		}
-		// Reset the group number counter if we failed to match this group
-		nextGroupNum = groupNum
 		return false, nil
 	}
 
@@ -358,20 +358,17 @@ func matchGroup(candidate, subpattern string) (bool, error) {
 	// Save the current captured groups
 	savedGroups := make([]string, len(capturedGroups))
 	savedCaptured := make([]bool, len(groupCaptured))
-	savedNextGroupNum := nextGroupNum
 	copy(savedGroups, capturedGroups)
 	copy(savedCaptured, groupCaptured)
 
 	// Reset captured groups for this match
 	capturedGroups = make([]string, 10)
 	groupCaptured = make([]bool, 10)
-	nextGroupNum = 1
 
 	if ok, err := match(candidate, subpattern, 0, 0); err != nil {
 		// Restore the saved groups before returning
 		capturedGroups = savedGroups
 		groupCaptured = savedCaptured
-		nextGroupNum = savedNextGroupNum
 		return false, err
 	} else if ok {
 		// We want to ensure it doesn't match only partially.
@@ -383,7 +380,6 @@ func matchGroup(candidate, subpattern string) (bool, error) {
 		// Restore the saved groups
 		capturedGroups = savedGroups
 		groupCaptured = savedCaptured
-		nextGroupNum = savedNextGroupNum
 
 		return finalOk, nil
 	}
@@ -391,7 +387,6 @@ func matchGroup(candidate, subpattern string) (bool, error) {
 	// Restore the saved groups
 	capturedGroups = savedGroups
 	groupCaptured = savedCaptured
-	nextGroupNum = savedNextGroupNum
 
 	return false, nil
 }

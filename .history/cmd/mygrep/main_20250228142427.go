@@ -21,6 +21,7 @@ func main() {
 	}
 
 	pattern := os.Args[2]
+	fmt.Fprintf(os.Stderr, "Pattern: %s\n", pattern)
 
 	line, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -28,11 +29,16 @@ func main() {
 		os.Exit(2)
 	}
 
+	fmt.Fprintf(os.Stderr, "Input: %s\n", string(line))
+
 	ok, err := matchLine(line, pattern)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(2)
 	}
+
+	fmt.Fprintf(os.Stderr, "Match result: %v\n", ok)
+	fmt.Fprintf(os.Stderr, "Captured groups: %v\n", capturedGroups)
 
 	if !ok {
 		os.Exit(1)
@@ -85,21 +91,30 @@ func match(text, pattern string, i, j int) (bool, error) {
 		groupNumStr := string(pattern[j+1])
 		groupNum, err := strconv.Atoi(groupNumStr)
 		if err != nil || groupNum >= len(capturedGroups) || groupNum == 0 {
+			fmt.Fprintf(os.Stderr, "Invalid backreference: \\%s\n", groupNumStr)
 			return false, fmt.Errorf("invalid backreference: \\%s", groupNumStr)
 		}
 
+		fmt.Fprintf(os.Stderr, "Checking backreference \\%d at position %d\n", groupNum, i)
+		fmt.Fprintf(os.Stderr, "Group %d captured: %v, value: %s\n", groupNum, groupCaptured[groupNum], capturedGroups[groupNum])
+
 		if !groupCaptured[groupNum] {
+			fmt.Fprintf(os.Stderr, "Group %d not captured yet\n", groupNum)
 			return false, nil
 		}
 
 		captured := capturedGroups[groupNum]
 		if len(text[i:]) < len(captured) {
+			fmt.Fprintf(os.Stderr, "Not enough text left to match backreference \\%d\n", groupNum)
 			return false, nil
 		}
 
 		if text[i:i+len(captured)] == captured {
+			fmt.Fprintf(os.Stderr, "Backreference \\%d matched: %s\n", groupNum, captured)
 			return match(text, pattern, i+len(captured), j+2)
 		}
+		fmt.Fprintf(os.Stderr, "Backreference \\%d failed to match: expected %s, got %s\n",
+			groupNum, captured, text[i:min(i+len(captured), len(text))])
 		return false, nil
 	}
 
@@ -110,6 +125,8 @@ func match(text, pattern string, i, j int) (bool, error) {
 		// Get the current group number and increment for the next one
 		groupNum := nextGroupNum
 		nextGroupNum++
+
+		fmt.Fprintf(os.Stderr, "Trying to match capturing group %d at position %d\n", groupNum, i)
 
 		// Make sure we have enough space
 		if groupNum >= len(capturedGroups) {
@@ -169,6 +186,7 @@ func match(text, pattern string, i, j int) (bool, error) {
 				// Store the capture in the correct group
 				capturedGroups[groupNum] = captured
 				groupCaptured[groupNum] = true
+				fmt.Fprintf(os.Stderr, "Captured group %d: %s\n", groupNum, captured)
 
 				// Try to match the rest of the pattern
 				if nextOk, err := match(text, pattern, i+length, end+1); err != nil {
@@ -425,4 +443,12 @@ func splitAlternatives(pattern string) []string {
 		result = append(result, current.String())
 	}
 	return result
+}
+
+// Helper function to get the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

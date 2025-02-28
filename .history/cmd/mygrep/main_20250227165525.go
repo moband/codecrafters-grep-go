@@ -4,15 +4,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"unicode"
 )
 
-// Store multiple capture groups
-var capturedGroups []string
-var groupCaptured []bool
-var nextGroupNum int // To keep track of the next group number
+// Global capture for group #1
+var group1 string
+var group1Captured bool
 
 func main() {
 	if len(os.Args) < 3 || os.Args[1] != "-E" {
@@ -42,10 +40,8 @@ func main() {
 func matchLine(line []byte, pattern string) (bool, error) {
 	text := string(line)
 
-	// Initialize captured groups to handle up to 9 groups
-	capturedGroups = make([]string, 10)
-	groupCaptured = make([]bool, 10)
-	nextGroupNum = 1 // Group numbering starts at 1
+	group1 = ""
+	group1Captured = false
 
 	if len(pattern) > 0 && pattern[0] == '^' {
 		return match(text, pattern, 0, 0)
@@ -79,26 +75,17 @@ func match(text, pattern string, i, j int) (bool, error) {
 	}
 
 	//-------------------------------------------------------------
-	// Handle backreference \1, \2, etc.
+	// Handle backreference \1
 	//-------------------------------------------------------------
-	if j+1 < len(pattern) && pattern[j] == '\\' && unicode.IsDigit(rune(pattern[j+1])) {
-		groupNumStr := string(pattern[j+1])
-		groupNum, err := strconv.Atoi(groupNumStr)
-		if err != nil || groupNum >= len(capturedGroups) || groupNum == 0 {
-			return false, fmt.Errorf("invalid backreference: \\%s", groupNumStr)
-		}
-
-		if !groupCaptured[groupNum] {
+	if j+1 < len(pattern) && pattern[j] == '\\' && pattern[j+1] == '1' {
+		if !group1Captured {
 			return false, nil
 		}
-
-		captured := capturedGroups[groupNum]
-		if len(text[i:]) < len(captured) {
+		if len(text[i:]) < len(group1) {
 			return false, nil
 		}
-
-		if text[i:i+len(captured)] == captured {
-			return match(text, pattern, i+len(captured), j+2)
+		if text[i:i+len(group1)] == group1 {
+			return match(text, pattern, i+len(group1), j+2)
 		}
 		return false, nil
 	}
@@ -107,21 +94,6 @@ func match(text, pattern string, i, j int) (bool, error) {
 	// Handle capturing group ( ... )
 	//-------------------------------------------------------------
 	if pattern[j] == '(' {
-		// Get the current group number and increment for the next one
-		groupNum := nextGroupNum
-		nextGroupNum++
-
-		// Make sure we have enough space
-		if groupNum >= len(capturedGroups) {
-			newSize := groupNum + 1
-			newGroups := make([]string, newSize)
-			newCaptured := make([]bool, newSize)
-			copy(newGroups, capturedGroups)
-			copy(newCaptured, groupCaptured)
-			capturedGroups = newGroups
-			groupCaptured = newCaptured
-		}
-
 		depth := 1
 		end := j + 1
 		for end < len(pattern) && depth > 0 {
@@ -166,9 +138,9 @@ func match(text, pattern string, i, j int) (bool, error) {
 			}
 
 			if matches {
-				// Store the capture in the correct group
-				capturedGroups[groupNum] = captured
-				groupCaptured[groupNum] = true
+				// Store the capture
+				group1 = captured
+				group1Captured = true
 
 				// Try to match the rest of the pattern
 				if nextOk, err := match(text, pattern, i+length, end+1); err != nil {
@@ -178,8 +150,6 @@ func match(text, pattern string, i, j int) (bool, error) {
 				}
 			}
 		}
-		// Reset the group number counter if we failed to match this group
-		nextGroupNum = groupNum
 		return false, nil
 	}
 
@@ -301,13 +271,8 @@ func matchSingleChar(text, pattern string, i, j int) (bool, int, error) {
 		return true, 1, nil
 	}
 
-	// If it's a backslash-escape like \d, \w, etc. (but not \1, \2, etc.)
+	// If it's a backslash-escape like \d, \w, etc. (but not \1)
 	if pattern[j] == '\\' && j+1 < len(pattern) {
-		if unicode.IsDigit(rune(pattern[j+1])) {
-			// Handled in match()
-			return false, 0, nil
-		}
-
 		switch pattern[j+1] {
 		case 'd':
 			return unicode.IsDigit(rune(text[i])), 2, nil
@@ -317,6 +282,7 @@ func matchSingleChar(text, pattern string, i, j int) (bool, int, error) {
 			return isWord, 2, nil
 		case '\\':
 			return (text[i] == '\\'), 2, nil
+		// We handle \1 in match(), so skip it here
 		default:
 			return false, 0, fmt.Errorf("invalid escape sequence: \\%c", pattern[j+1])
 		}
@@ -355,44 +321,17 @@ func matchSingleChar(text, pattern string, i, j int) (bool, int, error) {
 
 // matchGroup tries to match subpattern fully against candidate.
 func matchGroup(candidate, subpattern string) (bool, error) {
-	// Save the current captured groups
-	savedGroups := make([]string, len(capturedGroups))
-	savedCaptured := make([]bool, len(groupCaptured))
-	savedNextGroupNum := nextGroupNum
-	copy(savedGroups, capturedGroups)
-	copy(savedCaptured, groupCaptured)
-
-	// Reset captured groups for this match
-	capturedGroups = make([]string, 10)
-	groupCaptured = make([]bool, 10)
-	nextGroupNum = 1
-
 	if ok, err := match(candidate, subpattern, 0, 0); err != nil {
-		// Restore the saved groups before returning
-		capturedGroups = savedGroups
-		groupCaptured = savedCaptured
-		nextGroupNum = savedNextGroupNum
 		return false, err
 	} else if ok {
 		// We want to ensure it doesn't match only partially.
 		// The naive `match` can succeed even if candidate is partially matched.
 		// So let's ensure we consumed the entire candidate with ^...$ approach:
 		pat := "^" + subpattern + "$"
-		finalOk, _ := match(candidate, pat, 0, 0)
-
-		// Restore the saved groups
-		capturedGroups = savedGroups
-		groupCaptured = savedCaptured
-		nextGroupNum = savedNextGroupNum
-
-		return finalOk, nil
+		if finalOk, _ := match(candidate, pat, 0, 0); finalOk {
+			return true, nil
+		}
 	}
-
-	// Restore the saved groups
-	capturedGroups = savedGroups
-	groupCaptured = savedCaptured
-	nextGroupNum = savedNextGroupNum
-
 	return false, nil
 }
 
