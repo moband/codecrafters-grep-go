@@ -96,7 +96,7 @@ func (m *Matcher) match(text, pattern string, i, j int) (bool, error) {
 
 	nextPos := j + tokenLen
 	if nextPos < len(pattern) && (pattern[nextPos] == '+' || pattern[nextPos] == '?') {
-		return m.matchWithQuantifier(text, pattern, i, j, matched, tokenLen, nextPos)
+		return m.matchWithQuantifier(text, pattern, i, j, matched, nextPos)
 	}
 
 	if !matched {
@@ -197,7 +197,7 @@ func (m *Matcher) matchCapturingGroup(text, pattern string, i, j int) (bool, err
 	return false, nil
 }
 
-func (m *Matcher) matchWithQuantifier(text, pattern string, i, j int, matched bool, tokenLen int, nextPos int) (bool, error) {
+func (m *Matcher) matchWithQuantifier(text, pattern string, i, j int, matched bool, nextPos int) (bool, error) {
 	q := pattern[nextPos]
 
 	if q == '+' {
