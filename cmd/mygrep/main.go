@@ -82,10 +82,24 @@ func match(text, pattern string, i, j int) (bool, error) {
 	// Handle backreference \1, \2, etc.
 	//-------------------------------------------------------------
 	if j+1 < len(pattern) && pattern[j] == '\\' && unicode.IsDigit(rune(pattern[j+1])) {
-		groupNumStr := string(pattern[j+1])
+		// Get the backreference number - support multi-digit backreferences
+		groupNumStartIdx := j + 1
+		groupNumEndIdx := groupNumStartIdx + 1
+
+		// Find all consecutive digits for backreference number
+		for groupNumEndIdx < len(pattern) && unicode.IsDigit(rune(pattern[groupNumEndIdx])) {
+			groupNumEndIdx++
+		}
+
+		groupNumStr := pattern[groupNumStartIdx:groupNumEndIdx]
 		groupNum, err := strconv.Atoi(groupNumStr)
-		if err != nil || groupNum >= len(capturedGroups) || groupNum == 0 {
+		if err != nil || groupNum == 0 {
 			return false, fmt.Errorf("invalid backreference: \\%s", groupNumStr)
+		}
+
+		// Make sure we have enough space for this group
+		if groupNum >= len(capturedGroups) {
+			return false, nil
 		}
 
 		if !groupCaptured[groupNum] {
@@ -98,7 +112,7 @@ func match(text, pattern string, i, j int) (bool, error) {
 		}
 
 		if text[i:i+len(captured)] == captured {
-			return match(text, pattern, i+len(captured), j+2)
+			return match(text, pattern, i+len(captured), j+len(groupNumStr)+1)
 		}
 		return false, nil
 	}
@@ -137,7 +151,7 @@ func match(text, pattern string, i, j int) (bool, error) {
 		}
 		end-- // now 'end' is the position of ')'
 
-		content := pattern[j+1 : end]
+		originalContent := pattern[j+1 : end]
 
 		// Try to match the entire capturing group
 		for length := 0; i+length <= len(text); length++ {
@@ -147,37 +161,59 @@ func match(text, pattern string, i, j int) (bool, error) {
 
 			captured := text[i : i+length]
 
-			// Check if this captured text matches the group pattern
-			var matches bool
+			// Save the state of captured groups
+			savedGroups := make([]string, len(capturedGroups))
+			savedCaptured := make([]bool, len(groupCaptured))
+			savedNextGroupNum := nextGroupNum
+			copy(savedGroups, capturedGroups)
+			copy(savedCaptured, groupCaptured)
 
-			// If there are alternatives in the group
-			if strings.Contains(content, "|") {
-				alts := splitAlternatives(content)
+			var matched bool
+
+			// First, try handling alternatives if they exist
+			if strings.Contains(originalContent, "|") {
+				// Get all alternatives
+				alts := splitAlternatives(originalContent)
+
+				// Try each alternative
 				for _, alt := range alts {
-					// Check if the captured text matches this alternative
-					if matchesPattern(captured, alt) {
-						matches = true
+					// Run the full match algorithm on the captured text against this alternative
+					altOk, _ := match(captured, "^"+alt+"$", 0, 0)
+					if altOk {
+						matched = true
 						break
 					}
 				}
 			} else {
-				// No alternatives, just check if it matches the pattern
-				matches = matchesPattern(captured, content)
+				// No alternatives, try to match the content directly
+				subpatternOk, _ := match(captured, "^"+originalContent+"$", 0, 0)
+				matched = subpatternOk
 			}
 
-			if matches {
+			// If the pattern matched, store this capture and try to continue the match
+			if matched {
 				// Store the capture in the correct group
 				capturedGroups[groupNum] = captured
 				groupCaptured[groupNum] = true
 
 				// Try to match the rest of the pattern
 				if nextOk, err := match(text, pattern, i+length, end+1); err != nil {
+					// Restore the saved state if there's an error
+					copy(capturedGroups, savedGroups)
+					copy(groupCaptured, savedCaptured)
+					nextGroupNum = savedNextGroupNum
 					return false, err
 				} else if nextOk {
 					return true, nil
 				}
 			}
+
+			// Restore saved state if match doesn't continue
+			copy(capturedGroups, savedGroups)
+			copy(groupCaptured, savedCaptured)
+			nextGroupNum = savedNextGroupNum
 		}
+
 		// Reset the group number counter if we failed to match this group
 		nextGroupNum = groupNum
 		return false, nil
@@ -258,9 +294,16 @@ func match(text, pattern string, i, j int) (bool, error) {
 
 // Helper function to check if a string matches a pattern
 func matchesPattern(s, pattern string) bool {
-	// For patterns with quantifiers or character classes, we need to use the match function
-	if strings.ContainsAny(pattern, "+?") || strings.Contains(pattern, "\\w") || strings.Contains(pattern, "\\d") {
-		ok, _ := matchGroup(s, pattern)
+	// Look for backreferences, capturing groups, quantifiers, or character classes
+	if strings.ContainsAny(pattern, "+?") ||
+		strings.Contains(pattern, "\\w") ||
+		strings.Contains(pattern, "\\d") ||
+		strings.Contains(pattern, "(") ||
+		strings.Contains(pattern, "\\") && containsBackreference(pattern) {
+
+		// We need to anchor the pattern to ensure proper full matching
+		anchoredPattern := "^" + pattern + "$"
+		ok, _ := match(s, anchoredPattern, 0, 0)
 		return ok
 	}
 
@@ -279,6 +322,16 @@ func matchesPattern(s, pattern string) bool {
 	}
 
 	return true
+}
+
+// Helper function to check if a pattern contains a backreference
+func containsBackreference(pattern string) bool {
+	for i := 0; i < len(pattern)-1; i++ {
+		if pattern[i] == '\\' && unicode.IsDigit(rune(pattern[i+1])) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchSingleChar
@@ -317,6 +370,28 @@ func matchSingleChar(text, pattern string, i, j int) (bool, int, error) {
 			return isWord, 2, nil
 		case '\\':
 			return (text[i] == '\\'), 2, nil
+		case '(':
+			return (text[i] == '('), 2, nil
+		case ')':
+			return (text[i] == ')'), 2, nil
+		case '.':
+			return (text[i] == '.'), 2, nil
+		case '+':
+			return (text[i] == '+'), 2, nil
+		case '*':
+			return (text[i] == '*'), 2, nil
+		case '?':
+			return (text[i] == '?'), 2, nil
+		case '[':
+			return (text[i] == '['), 2, nil
+		case ']':
+			return (text[i] == ']'), 2, nil
+		case '|':
+			return (text[i] == '|'), 2, nil
+		case '$':
+			return (text[i] == '$'), 2, nil
+		case '^':
+			return (text[i] == '^'), 2, nil
 		default:
 			return false, 0, fmt.Errorf("invalid escape sequence: \\%c", pattern[j+1])
 		}
@@ -362,10 +437,18 @@ func matchGroup(candidate, subpattern string) (bool, error) {
 	copy(savedGroups, capturedGroups)
 	copy(savedCaptured, groupCaptured)
 
-	// Reset captured groups for this match
-	capturedGroups = make([]string, 10)
-	groupCaptured = make([]bool, 10)
-	nextGroupNum = 1
+	// When we're matching a nested pattern, we need to keep the parent's captured groups
+	// We don't reset capturedGroups here anymore, so nested backreferences work
+
+	// Process any backreferences in the pattern before matching
+	if containsBackreference(subpattern) {
+		processedPattern, err := processBackreferences(subpattern)
+		if err == nil {
+			// If processing succeeded, use the processed pattern
+			subpattern = processedPattern
+		}
+		// If there was an error processing backreferences, fall back to the original pattern
+	}
 
 	if ok, err := match(candidate, subpattern, 0, 0); err != nil {
 		// Restore the saved groups before returning
@@ -401,28 +484,91 @@ func splitAlternatives(pattern string) []string {
 	var current strings.Builder
 	depth := 0
 
-	for _, char := range pattern {
-		switch char {
-		case '(':
+	for i := 0; i < len(pattern); i++ {
+		char := pattern[i]
+
+		if char == '(' {
 			depth++
-			current.WriteRune(char)
-		case ')':
+			current.WriteByte(char)
+		} else if char == ')' {
 			depth--
-			current.WriteRune(char)
-		case '|':
-			if depth == 0 {
-				result = append(result, current.String())
-				current.Reset()
-			} else {
-				current.WriteRune(char)
+			current.WriteByte(char)
+		} else if char == '|' && depth == 0 {
+			// We found an alternative at the top level
+			result = append(result, current.String())
+			current.Reset()
+		} else if char == '\\' && i+1 < len(pattern) {
+			// Handle escape sequences like \|, \(, \), etc.
+			current.WriteByte(char)
+			if i+1 < len(pattern) {
+				current.WriteByte(pattern[i+1])
+				i++ // Skip the next character
 			}
-		default:
-			current.WriteRune(char)
+		} else {
+			current.WriteByte(char)
 		}
 	}
 
+	// Add the last alternative
 	if current.Len() > 0 {
 		result = append(result, current.String())
 	}
+
 	return result
+}
+
+// processBackreferences expands any backreferences in the pattern with their captured values
+func processBackreferences(pattern string) (string, error) {
+	var result strings.Builder
+	i := 0
+
+	for i < len(pattern) {
+		if i+1 < len(pattern) && pattern[i] == '\\' && unicode.IsDigit(rune(pattern[i+1])) {
+			// Get the backreference number - support multi-digit backreferences
+			groupNumStartIdx := i + 1
+			groupNumEndIdx := groupNumStartIdx + 1
+
+			// Find all consecutive digits for backreference number
+			for groupNumEndIdx < len(pattern) && unicode.IsDigit(rune(pattern[groupNumEndIdx])) {
+				groupNumEndIdx++
+			}
+
+			groupNumStr := pattern[groupNumStartIdx:groupNumEndIdx]
+			groupNum, err := strconv.Atoi(groupNumStr)
+			if err != nil || groupNum == 0 {
+				return "", fmt.Errorf("invalid backreference: \\%s", groupNumStr)
+			}
+
+			// Check if group exists
+			if groupNum >= len(capturedGroups) {
+				return "", fmt.Errorf("backreference to non-existent group: \\%s", groupNumStr)
+			}
+
+			if !groupCaptured[groupNum] {
+				return "", fmt.Errorf("backreference to uncaptured group: \\%s", groupNumStr)
+			}
+
+			// Append the captured text
+			result.WriteString(capturedGroups[groupNum])
+			i = groupNumEndIdx
+		} else if i+1 < len(pattern) && pattern[i] == '\\' {
+			// Handle other escape sequences
+			switch pattern[i+1] {
+			case 'w', 'd', '(', ')', '.', '+', '*', '?', '[', ']', '|', '$', '^', '\\', ',':
+				// Pass through the escape sequence
+				result.WriteByte('\\')
+				result.WriteByte(pattern[i+1])
+			default:
+				// For unknown escapes, just keep them as is
+				result.WriteByte('\\')
+				result.WriteByte(pattern[i+1])
+			}
+			i += 2
+		} else {
+			result.WriteByte(pattern[i])
+			i++
+		}
+	}
+
+	return result.String(), nil
 }
